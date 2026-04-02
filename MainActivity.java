@@ -17,6 +17,9 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.content.Intent;
+import android.net.Uri;
+import android.app.AlertDialog;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -26,6 +29,12 @@ import androidx.webkit.WebResourceErrorCompat;
 import androidx.webkit.WebResourceRequestCompat;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
+
+import org.json.JSONObject;
+
+import java.net.URL;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 public class MainActivity extends AppCompatActivity {
     private static final String HOME_URL = "https://appassets.androidplatform.net/assets/site/index.html";
@@ -66,6 +75,9 @@ public class MainActivity extends AppCompatActivity {
 
         configureWebView();
 
+        // 🔥 CHECK FOR UPDATE
+        checkForUpdate();
+
         findViewById(R.id.retry_button).setOnClickListener(v -> {
             showLoading(getString(R.string.loading_site));
             errorOverlay.setVisibility(View.GONE);
@@ -98,7 +110,6 @@ public class MainActivity extends AppCompatActivity {
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
         settings.setSupportMultipleWindows(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-        settings.setUserAgentString(settings.getUserAgentString() + " OxidelicStreamAndroid/1.0");
 
         webView.setFocusable(true);
         webView.setFocusableInTouchMode(true);
@@ -134,6 +145,47 @@ public class MainActivity extends AppCompatActivity {
     private void showError() {
         hideLoading();
         errorOverlay.setVisibility(View.VISIBLE);
+    }
+
+    // 🔥 UPDATE FUNCTION
+    void checkForUpdate() {
+        new Thread(() -> {
+            try {
+                URL url = new URL("https://raw.githubusercontent.com/Mayurraut3231/OxidelicStreamAPK/main/version.json");
+                BufferedReader reader = new BufferedReader(new InputStreamReader(url.openStream()));
+                StringBuilder json = new StringBuilder();
+                String line;
+
+                while ((line = reader.readLine()) != null) {
+                    json.append(line);
+                }
+
+                JSONObject obj = new JSONObject(json.toString());
+                int latestVersion = obj.getInt("version");
+
+                int currentVersion = 2; // 👈 CHANGE THIS WHEN YOU UPDATE APP
+
+                if (latestVersion > currentVersion) {
+                    String apkUrl = obj.getString("apk_url");
+
+                    runOnUiThread(() -> {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle("Update Available")
+                                .setMessage("New version available. Please update.")
+                                .setPositiveButton("Update", (d, w) -> {
+                                    Intent i = new Intent(Intent.ACTION_VIEW);
+                                    i.setData(Uri.parse(apkUrl));
+                                    startActivity(i);
+                                })
+                                .setCancelable(false)
+                                .show();
+                    });
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }).start();
     }
 
     private void enterFullscreen(View view, WebChromeClient.CustomViewCallback callback) {
@@ -184,18 +236,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        webView.onResume();
-    }
-
-    @Override
-    protected void onPause() {
-        webView.onPause();
-        super.onPause();
-    }
-
-    @Override
     protected void onDestroy() {
         if (webView != null) {
             webView.destroy();
@@ -203,97 +243,6 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
-    @Override
-    protected void onSaveInstanceState(@NonNull Bundle outState) {
-        super.onSaveInstanceState(outState);
-        webView.saveState(outState);
-    }
-
-    private final class OxidelicWebViewClient extends WebViewClientCompat {
-        @Override
-        public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-            return assetLoader.shouldInterceptRequest(request.getUrl());
-        }
-
-        @Override
-        public void onPageStarted(WebView view, String url, Bitmap favicon) {
-            super.onPageStarted(view, url, favicon);
-            showLoading(getString(R.string.loading_site));
-            errorOverlay.setVisibility(View.GONE);
-        }
-
-        @Override
-        public void onPageFinished(WebView view, String url) {
-            super.onPageFinished(view, url);
-            view.evaluateJavascript(
-                    "(function(){try{" +
-                            "window.open=function(){return null;};" +
-                            "document.querySelectorAll('a[target=\"_blank\"]').forEach(function(a){" +
-                            "a.setAttribute('target','_self');" +
-                            "a.setAttribute('rel','noopener noreferrer');" +
-                            "});" +
-                            "}catch(e){}})();",
-                    null
-            );
-            hideLoading();
-        }
-
-        @Override
-        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            android.net.Uri uri = request.getUrl();
-            if (isInternalAppUrl(uri)) {
-                return false;
-            }
-
-            // Consume popup/ad redirects so Android never launches Chrome.
-            return request.isForMainFrame();
-        }
-
-        @Override
-        public boolean shouldOverrideUrlLoading(WebView view, String url) {
-            return !isInternalAppUrl(android.net.Uri.parse(url));
-        }
-
-        @Override
-        public void onReceivedError(WebView view, WebResourceRequest request, WebResourceErrorCompat error) {
-            super.onReceivedError(view, request, error);
-            if (WebResourceRequestCompat.isRedirect(request)) return;
-            if (request.isForMainFrame()) {
-                showError();
-            }
-        }
-    }
-
-    private final class OxidelicChromeClient extends WebChromeClient {
-        @Override
-        public void onProgressChanged(WebView view, int newProgress) {
-            progressBar.setIndeterminate(false);
-            progressBar.setProgress(newProgress);
-            if (newProgress >= 95) {
-                hideLoading();
-            }
-        }
-
-        @Override
-        public void onPermissionRequest(final PermissionRequest request) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                request.grant(request.getResources());
-            }
-        }
-
-        @Override
-        public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
-            return false;
-        }
-
-        @Override
-        public void onShowCustomView(View view, CustomViewCallback callback) {
-            enterFullscreen(view, callback);
-        }
-
-        @Override
-        public void onHideCustomView() {
-            exitFullscreen();
-        }
-    }
+    private final class OxidelicWebViewClient extends WebViewClientCompat {}
+    private final class OxidelicChromeClient extends WebChromeClient {}
 }
